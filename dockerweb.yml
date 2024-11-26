@@ -1,0 +1,63 @@
+---
+- name: Deploy website as a Docker container
+  hosts: all
+  become: true
+
+  vars:
+    docker_image_name: "my_css_website_image"
+    docker_container_name: "my_css_website_container"
+    website_directory: "/tmp/css_website"
+    docker_port: 9091
+
+  tasks:
+    - name: Ensure Docker is installed
+      apt:
+        name: docker.io
+        state: present
+        update_cache: yes
+
+    - name: Ensure Docker is started and enabled
+      systemd:
+        name: docker
+        state: started
+        enabled: true
+
+    - name: Ensure port {{ docker_port }} is open in the firewall
+      ufw:
+        rule: allow
+        port: "{{ docker_port }}"
+        proto: tcp
+
+    - name: Copy website files (including CSS and Dockerfile) to remote host
+      copy:
+        src: ./  # Ensure the current directory is copied
+        dest: "{{ website_directory }}"
+        remote_src: no
+
+    - name: Stop and remove any container using port {{ docker_port }}
+      shell: |
+        container_id=$(docker ps -q --filter "publish={{ docker_port }}")
+        if [ ! -z "$container_id" ]; then
+          docker stop $container_id
+          docker rm $container_id
+        fi
+      ignore_errors: true
+
+
+    - name: Remove existing container with the same name
+      command: docker rm "{{ docker_container_name }}"
+      ignore_errors: true
+
+    - name: Build Docker image
+      command: docker build -t "{{ docker_image_name }}" .
+      args:
+        chdir: "{{ website_directory }}"
+
+    - name: Run Docker container
+      command: docker run -d --name "{{ docker_container_name }}" -p {{ docker_port }}:80 "{{ docker_image_name }}"
+
+    - name: Clean up website files from remote host
+      file:
+        path: "{{ website_directory }}"
+        state: absent
+
